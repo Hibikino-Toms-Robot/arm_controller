@@ -5,18 +5,18 @@
 
 /*
 @autor yoshida keisuke
-z軸アームと水平他関節アーム制御用プログラム
+y軸アームと水平他関節アーム制御用プログラム
 */
 
 /*pram_setting*/
-//z_motor_pram
-const int stepsPerRevolution = 800;       //モータの1回転あたりのステップ数
-const float ballScrewPitch = 10.0;        // ねじ軸の1回転に伴い、ナットが軸方向に進む距離[mm]
-float z_pos_max = 750.0;
-float z_pos_min = 100.0;
-int target_z_pos;
-float pre_pos_z = 0;
-
+//y_motor_pram
+const long stepsPerRevolution = 1000;       //モータの1回転あたりのステップ数
+const long ballScrewPitch = 5;        // ねじ軸の1回転に伴い、ナットが軸方向に進む距離[mm]
+long y_pos_max = 320;  
+long y_pos_min = 50;
+long target_y_pos;
+long pre_pos_y = 0;
+long step_y ;
 
 //mult_link_arm
 int Pulse_per_Rev = 1600.0;               //
@@ -24,18 +24,18 @@ float gear_ratio[3] = {20.25,20.25,4.0} ; //各モータのギア比
 
 //encoder param
 const int encoderResolution = 1000;       //encoder分解能
-uint16_t zero_pos_enc[3] = {540,610,645}; //[x,y] = [0,0]の際のエンコーダ値
+uint16_t zero_pos_enc[3] = {535,610,765}; //[x,y] = [0,0]の際のエンコーダ値
 int pre_angle[3] = {0,0,0};               //n-1の絶対角度(ラジアン) ここがstep=0の原点になっている。
 int target_angle[3] = {0,0,0};
 
 /*pin_setup*/
-//z_slider
+//y_slider
 int cwPlusPin = 10;   // CW + ピン
 int cwMinusPin = 11;  // CW - ピン
 int ccwPlusPin = 12;  // CCW + ピン
 int ccwMinusPin = 13; // CCW - ピン
-Stepper Z_StepperCW(stepsPerRevolution,cwPlusPin,cwMinusPin);    //時計まわり
-Stepper Z_StepperCCW(stepsPerRevolution,ccwPlusPin,ccwMinusPin); //半時計まわり
+Stepper Y_StepperCW(stepsPerRevolution,cwPlusPin,cwMinusPin);    //時計まわり
+Stepper Y_StepperCCW(stepsPerRevolution,ccwPlusPin,ccwMinusPin); //半時計まわり
 
 //mult_link_arm
 AccelStepper stepper1(AccelStepper::DRIVER, 3, 4);
@@ -53,17 +53,17 @@ boolean receivingData = false;
 
 void setup() {
   Serial.begin(115200);
-  //z_arm_setup
+  //y_arm_setup
   pinMode(cwPlusPin, OUTPUT);
   pinMode(cwMinusPin, OUTPUT);
   pinMode(ccwPlusPin, OUTPUT);
   pinMode(ccwMinusPin, OUTPUT);
-  Z_StepperCW.setSpeed(500);
-  Z_StepperCCW.setSpeed(500);
+  Y_StepperCW.setSpeed(500);
+  Y_StepperCCW.setSpeed(500);
   //arm_setup
-  stepper1.setMaxSpeed(800);
-  stepper2.setMaxSpeed(800);
-  stepper3.setMaxSpeed(800);
+  stepper1.setMaxSpeed(1400);
+  stepper2.setMaxSpeed(1400);
+  stepper3.setMaxSpeed(1400);
   steppers.addStepper(stepper1);
   steppers.addStepper(stepper2);
   steppers.addStepper(stepper3);
@@ -107,90 +107,110 @@ void Initialization() {
   calb_arm_pos();
   //ホームポジションへ移動
   move_home_pos();
-  Serial.println("初期化完了");
 }
-
 
 /*ホームポジションへ移動*/
 void move_home_pos(){
-  int home_z = 100;
+  calb_arm_pos();
+  int home_y = 60;
   int home_angle[3] = {20,70,0};
-  int step_num[3];
-  angle2step(home_angle,step_num);
-  int step_z = z_movement2step(home_z);
-  run_motor(step_z,step_num[0],step_num[1],step_num[2]);
+  run_y_motor(home_y);
+  run_multi_arm_motor(target_angle,step_num);
   calb_arm_pos();
 }
 
+// /*トマトを収穫ボックスへ運ぶ*/
+// void spit_into_harvest_box(){
+//   calb_arm_pos();
+//   int home_y = 60;
+//   int home_angle[3] = {20,80,90};
+//   int step_num[3];
+//   run_y_motor(home_y);
+//   angle2step(home_angle,step_num);
+//   run_multi_arm_motor(step_num[0],step_num[1],step_num[2]);    
+//   calb_arm_pos();
+// }
+
+void move2target(){
+  if (y_pos_min <= target_y_pos and target_y_pos <= y_pos_max){
+      run_y_motor(target_y_pos);
+      run_multi_arm_motor(target_angle,step_num);
+      calb_arm_pos();
+  }
+}
 
 void loop() {
-  while (Serial.available() > 0) {
-    char receivedChar = Serial.read();
-    if (receivedChar == header) {
-      receivedData = "";
-      receivingData = true;
-    } else if (receivedChar == footer && receivingData) {
-      if (receivedData.equals("init")) {
-        //初期化
-        Initialization(); 
-      }else if(receivedData.equals("home")){
-        //ホームポジションに移動
-        move_home_pos();
-      }else {
-        //指定位置に移動
-        int _ = sscanf(receivedData.c_str(), "%d,%d,%d,%d", &target_z_pos, &target_angle[0], &target_angle[1], &target_angle[2]);
-        int step_z = z_movement2step(target_z_pos);
-        int step_num[3];
-        angle2step(target_angle,step_num);
-        run_motor(step_z,step_num[0],step_num[1],step_num[2]);
-        calb_arm_pos();
-        String message = 'S'+String(pre_angle[0])+","+String(pre_angle[1])+","+String(pre_angle[2])+'M';
-        Serial.println(message);
-      }
-      receivingData = false;
-      receivedData = "";
-    } else if (receivingData){
-      receivedData += receivedChar;
+ while (Serial.available() > 0) {
+   char receivedChar = Serial.read();
+   if (receivedChar == header) {
+     receivedData = "";
+     receivingData = true;
+   } else if (receivedChar == footer && receivingData) {
+    if (receivedData.equals("init")) {
+      //初期化
+      Initialization();
+      String message = 'S'+String(pre_angle[0])+","+String(pre_angle[1])+","+String(pre_angle[2])+'E';
+      Serial.println(message); 
+    }else if(receivedData.equals("home")){
+      //ホームポジションに移動
+      move_home_pos();
+      String message = 'S'+String(pre_angle[0])+","+String(pre_angle[1])+","+String(pre_angle[2])+'E';
+      Serial.println(message);
+    // }else if(receivedData.equals("spit")){
+    //   //トマトを収穫ボックスへ運ぶ
+    //   spit_into_harvest_box();
+    //   String message = 'S'+String(pre_angle[0])+","+String(pre_angle[1])+","+String(pre_angle[2])+'E';
+    //   Serial.println(message);
+    }else {
+      //指定位置に移動
+      int _ = sscanf(receivedData.c_str(), "%d,%d,%d,%d", &target_y_pos, &target_angle[0], &target_angle[1], &target_angle[2]);
+      move2target();
+      String message = 'S'+String(pre_angle[0])+","+String(pre_angle[1])+","+String(pre_angle[2])+'E';
+      Serial.println(message);
     }
-  }
+    receivingData = false;
+    receivedData = "";
+   } else if (receivingData){
+    receivedData += receivedChar;
+   }
+ }
 }
 
-
-
-//目標位置(mm)⇨移動距離→ステップ数変換(z軸)
-int z_movement2step(int target_pos){
+void run_y_motor(int target_pos){
+  /*y_movement2step*/
+  //目標位置(mm)⇨移動距離→ステップ数変換(y軸)
   //目標位置⇨移動距離
-  if (target_pos >= z_pos_max){
-    target_pos = z_pos_max;
-  }else if(target_pos <= z_pos_min){
-    target_pos = z_pos_min;
-  }
-  int move_distance = target_pos - pre_pos_z;
-  pre_pos_z = target_pos;
+  long move_distance = (target_pos - pre_pos_y);
+  pre_pos_y = target_pos;
   //移動距離→ステップ数変換
-  int move_steps = move_distance / ballScrewPitch * stepsPerRevolution ; 
-  return move_steps;
-}
-
-//移動距離→ステップ数変換(水平他関節アーム)
-void angle2step(int *target_angle,int *step_num){
-  for (int i = 0; i < 3; i++) {
-    int diff_angle = target_angle[i] - pre_angle[i] ;
-    step_num[i] = diff_angle / 360.0 * Pulse_per_Rev * gear_ratio[i] ;
+  long move_y_steps =  move_distance / ballScrewPitch * stepsPerRevolution ;
+  if (move_y_steps > 0){
+    while(move_y_steps - 32767 > 0){
+        move_y_steps = move_y_steps - 32767;
+        Y_StepperCCW.step(32767);
+      }
+    Y_StepperCCW.step(move_y_steps);
+  }else{
+    move_y_steps = abs(move_y_steps);
+    while(move_y_steps - 32767 > 0){
+        move_y_steps = move_y_steps - 32767;
+        Y_StepperCW.step(32767);
+      }
+    Y_StepperCW.step(move_y_steps);          
   }
+  return move_y_steps;
 }
 
 /*モータ動作関数*/
-void run_motor(int stepz, int step1, int step2, int step3){
-  if (stepz > 0){
-    Z_StepperCCW.step(abs(stepz));
-  }else{
-    Z_StepperCW.step(abs(stepz));            
-  }
+void run_multi_arm_motor(int *target_angle,int *step_num){
   long positions[3];
+  for (int i = 0; i < 3; i++) {
+    int diff_angle = target_angle[i] - pre_angle[i] ;
+    positions[i] = diff_angle / 360.0 * Pulse_per_Rev * gear_ratio[i] ;
+  }
   positions[0] = step1;
   positions[1] = step2;
-  positions[2] = -step3;
+  positions[2] = step3;
   steppers.moveTo(positions);
   steppers.runSpeedToPosition();
 }
